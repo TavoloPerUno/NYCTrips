@@ -1,0 +1,99 @@
+---
+title: "NYC Monday Morning Yellow Taxi Rides"
+author: "Manoradhan Murugesan"
+date: "10/16/2016"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, tidy.opts=list(width.cutoff=80),tidy=TRUE)
+```
+
+## Overview and data sources
+
+This assignment uses the trip records data of New York City Yellow Medallion Taxicabs and looks for spatial patterns in Monday morning taxi rides to work. The data sources used are [NYC Taxi and Limousine Commission (TLC) trip record data](http://www.nyc.gov/html/tlc/html/about/trip_record_data.shtml) for trip records, [NYC Department of City Planning](http://www1.nyc.gov/site/planning/data-maps/open-data/dwn-nynta.page) for neighbourhood boundary information and [NYC Open Data](https://data.cityofnewyork.us/City-Government/New-York-City-Population-By-Neighborhood-Tabulatio/swpk-hqdp/data) for NYC population figures by neighbourhood
+
+## Variables
+Variables of interest in trip records data set are,
+
+* tpep_dropoff_datetime - Drop location information
+* Dropoff_longitude - Drop location longitude
+* Dropoff_latitude - Drop location latitude
+
+## Cleaning and preparation of data
+As observations with no drop location and arrival time information are of no use, they are filtered out. Trip records on Monday mornings between 8 and 10 pm are then exported into a CSV file which will be fed into GeoDA for further processing.
+
+```{r eval=FALSE}
+#Set the working directory
+setwd("~/Documents/RWorkspace/Spatial Data Science/NYC Trips")
+#Download data
+yellow <- read.csv("yellow_tripdata_2016-01.csv", header=T)
+#Filter out observations which don't have dropoff datetime and co-ordination information
+yellow <- with(yellow, yellow[!is.na(tpep_dropoff_datetime) & !is.na(dropoff_longitude) & !is.na(dropoff_latitude),])
+#Cast datetime field to POSIXlt
+yellow$tpep_dropoff_datetime <- strptime(x = as.character(yellow$tpep_dropoff_datetime),
+                                         format = "%Y-%m-%d %H:%M:%S", tz="America/New_York")
+#Get monday morning rides between 8 and 9 am. Ignore January 1 information, as it is a holiday.
+yellow <- with(yellow, yellow[(tpep_dropoff_datetime)$wday == 1 
+                           & (tpep_dropoff_datetime)$mday != 1 
+                           & (tpep_dropoff_datetime)$hour %in% c(8, 9),])
+names(yellow)[names(yellow)=="tpep_dropoff_datetime"] <- "dropoff_datetime"
+names(yellow)[names(yellow)=="tpep_dropoff_datetime"] <- "dropoff_datetime"
+names(yellow)[names(yellow)=="Dropoff_longitude"] <- "dropoff_longitude"
+names(yellow)[names(yellow)=="Dropoff_latitude"] <- "dropoff_latitude"
+#Export the data to be fed to GeoDA
+write.csv(yellow, file = "trips.csv")
+```
+
+## Point maps
+### Point map with no basemap
+$$\includegraphics{Points_no_base.png}$$
+
+### Points in context
+$$\includegraphics[height=290pt]{Points_with_base.png}$$
+
+## Boundary and population information
+The observations in trip records data have no information regarding their neighbourhoods, neither the boundaries nor the Ids. CARTO was used to compare the geolocation information obtained from the trip records data with the boundary information in [New York City Population By Neighborhood Tabulation Areas](http://www1.nyc.gov/site/planning/data-maps/open-data/dwn-nynta.page) dataset. The function of interest here is the geometry function 'ST_Intersects'. As population information of the neighbourhoods is also added to the aggregated data and exported into a shape file, for further processing with GeoDA.
+
+```{r eval=FALSE}
+  SELECT nyc.the_geom, 
+       nyc.borocode, 
+       nyc.boroname, 
+       nyc.ntacode, 
+       nyc.ntaname, 
+       popbyneigh.population AS "population",
+       count(*) as "noRides"
+  FROM nynta AS "nyc"
+  JOIN trips_edited AS "trp"
+  ON 
+    ST_Intersects(trp.the_geom, nyc.the_geom)
+  JOIN popbyneigh
+  ON nyc.ntacode = popbyneigh.nta_code
+  WHERE popbyneigh.year = 2010
+  GROUP BY
+    nyc.the_geom, 
+    nyc.ntacode, 
+    nyc.ntaname,
+    nyc.borocode, 
+    nyc.boroname,
+    popbyneigh.population
+  ORDER BY
+      nyc.borocode, 
+      nyc.boroname, 
+      nyc.ntacode
+```
+
+
+## Choropleth map
+
+The rides per capita variable (density variable) is contructed in GeoDa is contructed and the choropleth maps are generated for the count and density variables.
+
+### Number of rides
+$$\includegraphics[height=290pt]{Choro.png}$$
+
+### Rides per capita
+$$\includegraphics{ChoroPerCap.png}$$
+
+## Inference
+
+The data points are more dense in Manhattan, suggesting the general commute direction of people heading to work. Boros further out from Manhattan generally have fewer taxi trips directed towards them. However, the per capita plot has higher outliers in outer neighbourhoods of Brooklyn, which might be explained by their lower population. The per capita plot also reveals the higher number of destinations around the airport in Queens.
